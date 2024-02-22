@@ -1,0 +1,14 @@
+import numpy as np
+import matplotlib.pyplot as plt
+import os
+from PIL import Image
+
+# Load the .tif image
+mask_path = "./data/BR_A001/Mask/WV01/014886600010_01_P002/ShadowMask-49cm.tif"
+mask = Image.open(mask_path)
+mask = np.array(mask)
+unique, counts = np.unique(mask, return_counts=True)
+
+# Create a dictionary to hold the count of each pixel value
+pixel_counts = dict(zip(unique, counts))
+print(pixel_counts)
