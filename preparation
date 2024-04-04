@@ -2,13 +2,91 @@ import numpy as np
 import matplotlib.pyplot as plt
 import os
 from PIL import Image
+from tqdm import tqdm
+import shutil
+import json
+from datetime import datetime
+from osgeo import gdal
 
-# Load the .tif image
-mask_path = "./data/BR_A001/Mask/WV01/014886600010_01_P002/ShadowMask-49cm.tif"
-mask = Image.open(mask_path)
-mask = np.array(mask)
-unique, counts = np.unique(mask, return_counts=True)
+country_list = ["BR_A001", "NZ_A001", "NZ_A002", "US_A001", "ZA_A001"]
+wv_list = ["WV01", "WV02", "WV03"]
+countries_dict = {}
 
-# Create a dictionary to hold the count of each pixel value
-pixel_counts = dict(zip(unique, counts))
-print(pixel_counts)
+for country in country_list:
+    perfect = 0
+    nocloud = 0
+    total = 0
+    if country not in countries_dict:
+        countries_dict[country] = []
+
+    for wv in wv_list:
+        image_folder_path = "../data/" + country + '/Image/' + wv + '/'
+        for item in os.listdir(image_folder_path):
+            if item.endswith(".tif"):
+                # image path
+                image_path = image_folder_path + item
+                total += 1
+
+                file_name = item.split("-")[-1]
+                mask_folder_path = image_folder_path.replace("Image", "Mask") + '/' + file_name.replace(".tif", '/')
+                for mask in os.listdir(mask_folder_path):
+                    if len(mask) == 22 and mask.startswith("Occlusion"):
+                        # mask path
+                        mask_path = mask_folder_path + mask
+                
+                # metadata path
+                metadata_path = image_path.replace("Image", "Metadata").replace(".tif", ".json")
+
+                with open(metadata_path, 'r') as f:
+                    metadata = json.load(f)
+                    cloud_cover = metadata['cloud_cover']
+                    nodata_fraction = metadata['nodata_fraction']
+                    acquisition_time = metadata['acquisition_time']['isoformat']
+                    acquisition_time = datetime.fromisoformat(acquisition_time)
+
+                    if cloud_cover == 0:
+                        nocloud += 1
+                    if cloud_cover == 0 and nodata_fraction < 1e-7:
+                        perfect += 1
+
+                        occluded_mask = gdal.Open(mask_path).ReadAsArray()
+                        occluded_ratio = np.sum(occluded_mask[occluded_mask==1]) / (occluded_mask.shape[0] * occluded_mask.shape[1])
+
+                        countries_dict[country].append(
+                            {"image_path": image_path,
+                             "mask_path": mask_path,
+                             "acquisition_date": acquisition_time,
+                             "occluded_ratio": occluded_ratio,
+                             })
+
+    print(country + ' -- nocloud number: ' + str(nocloud))
+    print(country + ' -- satisfied number: ' + str(perfect))
+    print('percentage: '+ str(round(perfect/total*100,5))+ '%, with total number: '+ str(total))
+    
+    
+base_dir = '../pro_data/'
+for country, data in countries_dict.items():
+    if country == "BR_A001":
+        continue
+    
+    if os.path.exists(base_dir + country):
+        shutil.rmtree(base_dir + country)
+    os.makedirs(base_dir + country + '/image/')
+    os.makedirs(base_dir + country + '/mask/')
+
+    sorted_data = sorted(data, key=lambda x: x['occluded_ratio'], reverse=True)
+    top_masks = sorted_data[:6]
+    if top_masks[-1]['occluded_ratio'] > 0.025:
+        for i in range(6, len(sorted_data)):
+            if sorted_data[i]['occluded_ratio'] > 0.025:
+                top_masks.append(sorted_data[i])
+            else:
+                break
+
+    for item in data:
+        if item['occluded_ratio'] < 0.01:
+            shutil.copy(item['image_path'], base_dir + country + '/image/' + os.path.basename(item['image_path']))
+    
+    for item in top_masks:
+        shutil.copy(item['mask_path'], base_dir + country + '/mask/'+ os.path.basename(item['image_path']).replace(".tif", "_mask.tif"))
+
