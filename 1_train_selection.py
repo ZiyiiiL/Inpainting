@@ -18,7 +18,7 @@ from timeit import default_timer as timer
 import warnings
 from torch.utils.data import Dataset, IterableDataset, DataLoader, DistributedSampler, ConcatDataset
 
-# 删除occluded pixel分布太均匀，即使总ratio低但难以截取256*256的patch的图像
+# 删除occluded pixel分布太均匀、即使总ratio低但难以截取256*256的patch的图像
 
 def random_crop(img_train_split, nodata_mask_train_split, size=256, image_path=None):
     h, w = img_train_split.shape
